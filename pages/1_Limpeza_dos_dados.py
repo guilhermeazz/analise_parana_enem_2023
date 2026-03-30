@@ -84,7 +84,7 @@ colunas_nomes = [
 def plotar_boxplot_comparativo(df_plot, coluna, titulo, subtitulo, cor_fundo):
     fig, ax = plt.subplots(figsize=(8, 4))
     
-    # Prepara um DataFrame temporário (Remove NaNs apenas para o Seaborn não falhar no plot bruto)
+    # Prepara o DataFrame temporário
     df_temp = df_plot[['SG_UF_PROVA', coluna]].dropna().copy()
     df_temp['Regiao_Label'] = np.where(df_temp['SG_UF_PROVA'] == 'PR', 'Paraná (PR)', 'Brasil (Sem PR)')
     
@@ -92,8 +92,10 @@ def plotar_boxplot_comparativo(df_plot, coluna, titulo, subtitulo, cor_fundo):
         data=df_temp, 
         x=coluna, 
         y='Regiao_Label', 
+        hue='Regiao_Label',  # AJUSTE: Diz ao Seaborn que a cor vem desta coluna
         ax=ax, 
         palette=['#1f77b4', '#ff7f0e'], 
+        legend=False,        # AJUSTE: Remove a legenda repetida (já que o eixo Y já diz o que é)
         order=['Paraná (PR)', 'Brasil (Sem PR)']
     )
     
@@ -101,8 +103,6 @@ def plotar_boxplot_comparativo(df_plot, coluna, titulo, subtitulo, cor_fundo):
     ax.set_ylabel('')
     ax.set_xlabel('Nota Avaliada')
     ax.grid(True, linestyle='--', alpha=0.5)
-    
-    # Adiciona um leve tom de fundo ao gráfico para diferenciar visualmente o Antes e Depois
     ax.set_facecolor(cor_fundo)
     
     return fig
