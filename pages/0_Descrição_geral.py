@@ -52,7 +52,7 @@ df = carregar_resumo_metricas()
 # =====================================================================
 # 1. ORIGEM E VOLUME DOS DADOS
 # =====================================================================
-st.header("1. Origem e o volume dos dados analisados?")
+st.header("1. Origem e o volume dos dados analisados")
 st.write("""
 Os dados foram extraídos dos **Microdados do ENEM 2023**, disponibilizados pelo **INEP** (Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira). 
 A base de dados original contém informações de milhões de inscritos, incluindo notas, perfis socioeconômicos e questionários contextuais.
@@ -91,7 +91,7 @@ st.markdown("---")
 # =====================================================================
 # 2. VARIÁVEIS UTILIZADAS
 # =====================================================================
-st.header("2. Variáveis compõem este estudo?")
+st.header("2. Variáveis compõem este estudo")
 st.write("""
 Para realizar as análises estocásticas e socioeconômicas, selecionamos um conjunto estratégico de variáveis 
 que permitem correlacionar o desempenho acadêmico com fatores externos.
