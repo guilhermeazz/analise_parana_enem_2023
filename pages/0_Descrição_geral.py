@@ -1,16 +1,20 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import os
+import plotly.express as px
+import plotly.figure_factory as ff
+import plotly.io as pio
 
 # =====================================================================
 # CONFIGURAÇÃO DE DIRETÓRIOS E PÁGINA
 # =====================================================================
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(ROOT_DIR, 'data')
+CACHE_DIR = os.path.join(ROOT_DIR, 'cache_graficos')
 ARQUIVO_LIMPO = os.path.join(DATA_DIR, 'enem_2023_limpo.parquet')
+
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 st.set_page_config(page_title="Descrição Geral", page_icon="📖", layout="wide")
 
@@ -18,25 +22,37 @@ st.title("📖 Descrição Geral do Dataset")
 st.markdown("---")
 
 # =====================================================================
-# CARREGAMENTO DOS DADOS
+# FUNÇÃO DE MOTOR DE CACHE (JSON)
+# =====================================================================
+def obter_grafico_cache(nome_arquivo, funcao_geradora):
+    caminho = os.path.join(CACHE_DIR, nome_arquivo)
+    if os.path.exists(caminho):
+        return pio.read_json(caminho)
+    
+    fig = funcao_geradora()
+    pio.write_json(fig, caminho)
+    return fig
+
+# =====================================================================
+# CARREGAMENTO DOS DADOS (PARA MÉTRICAS)
 # =====================================================================
 if not os.path.exists(ARQUIVO_LIMPO):
     st.error("⚠️ Dados não encontrados. Por favor, processe os dados na Home.")
     st.stop()
 
 @st.cache_data
-def carregar_resumo():
-    colunas = ['SG_UF_PROVA', 'NU_NOTA_MT'] # MT apenas para contar registros válidos
+def carregar_resumo_metricas():
+    colunas = ['SG_UF_PROVA', 'NU_NOTA_MT']
     df = pd.read_parquet(ARQUIVO_LIMPO, columns=colunas)
     df['Regiao'] = np.where(df['SG_UF_PROVA'] == 'PR', 'Paraná (PR)', 'Brasil (Sem PR)')
     return df
 
-df = carregar_resumo()
+df = carregar_resumo_metricas()
 
 # =====================================================================
 # 1. ORIGEM E VOLUME DOS DADOS
 # =====================================================================
-st.header("1. Qual a origem e o volume dos dados analisados?")
+st.header("1. Origem e o volume dos dados analisados?")
 st.write("""
 Os dados foram extraídos dos **Microdados do ENEM 2023**, disponibilizados pelo **INEP** (Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira). 
 A base de dados original contém informações de milhões de inscritos, incluindo notas, perfis socioeconômicos e questionários contextuais.
@@ -51,24 +67,31 @@ c1.metric("Total de Candidatos (Amostra Limpa)", f"{total_geral:,}".replace(',',
 c2.metric("Candidatos no Paraná", f"{total_pr:,}".replace(',', '.'))
 c3.metric("Candidatos no Brasil (Restante)", f"{total_br:,}".replace(',', '.'))
 
-# GRÁFICO DE PIZZA: PROPORÇÃO DA AMOSTRA
-fig1, ax1 = plt.subplots(figsize=(6, 6))
-labels = ['Paraná (PR)', 'Brasil (Sem PR)']
-sizes = [total_pr, total_br]
-colors = ['#1f77b4', '#ff7f0e']
-explode = (0.1, 0)  # Destaca a fatia do Paraná
+# Gráfico de Pizza (Restaurado com Plotly + Cache)
+def gerar_pizza_proporcao():
+    df_pie = pd.DataFrame({
+        'Regiao': ['Paraná (PR)', 'Brasil (Sem PR)'],
+        'Quantidade': [total_pr, total_br]
+    })
+    fig = px.pie(
+        df_pie, values='Quantidade', names='Regiao',
+        title="Proporção de Representatividade na Amostra",
+        color='Regiao',
+        color_discrete_map={'Paraná (PR)': '#1f77b4', 'Brasil (Sem PR)': '#ff7f0e'},
+        hole=0.3
+    )
+    fig.update_traces(textposition='inside', textinfo='percent+label', textfont_size=14)
+    return fig
 
-ax1.pie(sizes, explode=explode, labels=labels, autopct='%1.1f%%',
-        shadow=True, startangle=90, colors=colors, textprops={'weight': 'bold'})
-ax1.set_title("Proporção de Representatividade na Amostra", weight='bold')
-st.pyplot(fig1)
+fig1 = obter_grafico_cache("pie_representatividade.json", gerar_pizza_proporcao)
+st.plotly_chart(fig1, use_container_width=True)
 
 st.markdown("---")
 
 # =====================================================================
 # 2. VARIÁVEIS UTILIZADAS
 # =====================================================================
-st.header("2. Quais variáveis compõem este estudo?")
+st.header("2. Variáveis compõem este estudo?")
 st.write("""
 Para realizar as análises estocásticas e socioeconômicas, selecionamos um conjunto estratégico de variáveis 
 que permitem correlacionar o desempenho acadêmico com fatores externos.
@@ -79,24 +102,35 @@ data_info = {
     "Variável Original": ["SG_UF_PROVA", "NU_NOTA_(CN, CH, LC, MT, REDACAO)", "Q006", "Q024 / Q025", "TP_SEXO / TP_FAIXA_ETARIA"],
     "Descrição": ["Estado de realização da prova", "Notas nas 5 áreas de conhecimento", "Renda mensal da família", "Posse de computador e internet", "Sexo biológico e idade agrupada"]
 }
-st.table(pd.DataFrame(data_info))
+st.dataframe(pd.DataFrame(data_info), use_container_width=True, hide_index=True)
 
-# GRÁFICO DE BARRAS: VOLUME DE DADOS POR ÁREA (COMPARAÇÃO)
+# Gráfico de Barras Log (Restaurado com Plotly + Cache)
 st.write("**Disponibilidade de registros por Região**")
-fig2, ax2 = plt.subplots(figsize=(10, 4))
-ax2.barh(['Brasil (Sem PR)', 'Paraná (PR)'], [total_br, total_pr], color=['#ff7f0e', '#1f77b4'], alpha=0.8)
-ax2.set_title("Volume Absoluto de Candidatos (Escala Logarítmica para Visualização)")
-ax2.set_xscale('log') # Escala logarítmica para conseguir ver a barra do PR perto da do Brasil
-ax2.set_xlabel("Quantidade de Inscritos (Log)")
-ax2.grid(True, linestyle='--', alpha=0.3)
-st.pyplot(fig2)
+
+def gerar_barras_volume():
+    df_bar = pd.DataFrame({
+        'Regiao': ['Brasil (Sem PR)', 'Paraná (PR)'],
+        'Quantidade': [total_br, total_pr]
+    })
+    fig = px.bar(
+        df_bar, x='Quantidade', y='Regiao', orientation='h',
+        log_x=True,
+        title="Volume Absoluto de Candidatos (Escala Logarítmica)",
+        color='Regiao',
+        color_discrete_map={'Paraná (PR)': '#1f77b4', 'Brasil (Sem PR)': '#ff7f0e'}
+    )
+    fig.update_layout(showlegend=False, xaxis_title="Quantidade de Inscritos (Log)", yaxis_title="")
+    return fig
+
+fig2 = obter_grafico_cache("bar_volume_log.json", gerar_barras_volume)
+st.plotly_chart(fig2, use_container_width=True)
 
 st.markdown("---")
 
 # =====================================================================
 # 3. CONTEXTO DO PROJETO
 # =====================================================================
-st.header("3. Como os dados foram preparados?")
+st.header("3. Preparação dos dados")
 st.write("""
 Diferente da base bruta, os dados apresentados aqui passaram por um processo de **Engenharia de Dados**:
 1. **Filtragem Geográfica:** Separação entre o público paranaense e o restante do país.
@@ -104,11 +138,28 @@ Diferente da base bruta, os dados apresentados aqui passaram por um processo de 
 3. **Conversão de Tipos:** Otimização para garantir que o painel web funcione de forma rápida.
 """)
 
-# GRÁFICO DE ÁREA: REPRESENTAÇÃO VISUAL DA DENSIDADE
+# Gráfico de Densidade (Restaurado com Plotly + Cache)
 st.write("**Densidade de Registros (Exemplo: Matemática)**")
-fig3, ax3 = plt.subplots(figsize=(10, 4))
-sns.kdeplot(df[df['Regiao'] == 'Paraná (PR)']['NU_NOTA_MT'], fill=True, color="#1f77b4", label="Paraná", ax=ax3)
-sns.kdeplot(df[df['Regiao'] == 'Brasil (Sem PR)']['NU_NOTA_MT'], fill=True, color="#ff7f0e", label="Brasil", ax=ax3)
-ax3.set_title("Distribuição Global das Notas na Amostra")
-ax3.legend()
-st.pyplot(fig3)
+
+def gerar_densidade_mt():
+    # Amostragem para o gráfico de densidade não ficar pesado no JSON
+    df_sample = df.sample(n=min(100000, len(df)), random_state=42)
+    notas_pr = df_sample[df_sample['Regiao'] == 'Paraná (PR)']['NU_NOTA_MT'].dropna()
+    notas_br = df_sample[df_sample['Regiao'] == 'Brasil (Sem PR)']['NU_NOTA_MT'].dropna()
+    
+    fig = ff.create_distplot(
+        [notas_pr, notas_br], 
+        group_labels=['Paraná', 'Brasil'], 
+        show_hist=False,
+        colors=['#1f77b4', '#ff7f0e']
+    )
+    fig.update_layout(
+        title="Distribuição Global das Notas na Amostra (Matemática)",
+        xaxis_title="Nota",
+        yaxis_title="Densidade",
+        margin=dict(l=20, r=20, t=50, b=20)
+    )
+    return fig
+
+fig3 = obter_grafico_cache("density_matematica.json", gerar_densidade_mt)
+st.plotly_chart(fig3, use_container_width=True)

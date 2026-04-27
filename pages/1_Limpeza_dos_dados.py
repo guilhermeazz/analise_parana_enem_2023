@@ -1,18 +1,20 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import os
+import plotly.graph_objects as go
+import plotly.io as pio
 
 # =====================================================================
 # CONFIGURAÇÃO DE DIRETÓRIOS E PÁGINA
 # =====================================================================
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(ROOT_DIR, 'data')
-
+CACHE_DIR = os.path.join(ROOT_DIR, 'cache_graficos')
 ARQUIVO_BRUTO = os.path.join(DATA_DIR, 'enem2023.parquet')
 ARQUIVO_LIMPO = os.path.join(DATA_DIR, 'enem_2023_limpo.parquet')
+
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 st.set_page_config(page_title="Limpeza de Dados", page_icon="🧹", layout="wide")
 
@@ -20,55 +22,55 @@ st.title("🧹 Processo de Limpeza e Preparação dos Dados")
 st.markdown("---")
 
 # =====================================================================
-# CARREGAMENTO DOS DADOS (COM CACHE PARA PERFORMANCE)
+# MOTOR DE CACHE (JSON)
 # =====================================================================
-@st.cache_data
-def carregar_dados_brutos():
-    """Carrega apenas as colunas essenciais da base bruta original"""
-    colunas_alvo = ['SG_UF_PROVA', 'NU_NOTA_CN', 'NU_NOTA_CH', 'NU_NOTA_LC', 'NU_NOTA_MT', 'NU_NOTA_REDACAO']
-    return pd.read_parquet(ARQUIVO_BRUTO, columns=colunas_alvo)
-
-@st.cache_data
-def carregar_dados_limpos():
-    """Carrega a base final já tratada (sem outliers e sem nulos)"""
-    return pd.read_parquet(ARQUIVO_LIMPO)
-
-# Carregando as duas bases em memória
-df_bruto = carregar_dados_brutos()
-df_limpo = carregar_dados_limpos()
+def obter_grafico_cache(nome_arquivo, funcao_geradora):
+    caminho = os.path.join(CACHE_DIR, nome_arquivo)
+    if os.path.exists(caminho):
+        return pio.read_json(caminho)
+    
+    fig = funcao_geradora()
+    pio.write_json(fig, caminho)
+    return fig
 
 # =====================================================================
-# SEÇÃO 1: DADOS FALTANTES (CÁLCULO DINÂMICO E CONSISTENTE)
+# CARREGAMENTO DOS DADOS (PARA CÁLCULOS DE MÉTRICAS)
+# =====================================================================
+@st.cache_data
+def carregar_dados_basicos():
+    colunas = ['SG_UF_PROVA', 'NU_NOTA_CN', 'NU_NOTA_CH', 'NU_NOTA_LC', 'NU_NOTA_MT', 'NU_NOTA_REDACAO']
+    df_b = pd.read_parquet(ARQUIVO_BRUTO, columns=colunas)
+    df_l = pd.read_parquet(ARQUIVO_LIMPO, columns=colunas)
+    return df_b, df_l
+
+df_bruto, df_limpo = carregar_dados_basicos()
+
+# =====================================================================
+# 1. TRATAMENTO DE DADOS FALTANTES
 # =====================================================================
 colunas_notas = ['NU_NOTA_CN', 'NU_NOTA_CH', 'NU_NOTA_LC', 'NU_NOTA_MT', 'NU_NOTA_REDACAO']
 
-# Separa a base bruta por região para contar as faltas reais
-df_pr_bruto = df_bruto[df_bruto['SG_UF_PROVA'] == 'PR']
-df_br_bruto = df_bruto[df_bruto['SG_UF_PROVA'] != 'PR']
-
-# Conta quantas linhas possuem pelo menos um dado faltante
-faltantes_pr = int(df_pr_bruto[colunas_notas].isnull().any(axis=1).sum())
-faltantes_br = int(df_br_bruto[colunas_notas].isnull().any(axis=1).sum())
+# Cálculos dinâmicos para as métricas
+faltantes_pr = int(df_bruto[df_bruto['SG_UF_PROVA'] == 'PR'][colunas_notas].isnull().any(axis=1).sum())
+faltantes_br = int(df_bruto[df_bruto['SG_UF_PROVA'] != 'PR'][colunas_notas].isnull().any(axis=1).sum())
 
 st.header("1. Tratamento de Dados Faltantes")
 st.write("A base de dados bruta do ENEM possui um elevado índice de abstenções, o que gera dados nulos (NaN) nas colunas de notas. Para garantir a integridade da modelagem estatística, todos os alunos com notas em branco foram removidos da nossa amostra.")
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Tamanho Original da Base", f"{len(df_bruto):,}".replace(',', '.'))
-col2.metric("Tamanho Após Limpeza", f"{len(df_limpo):,}".replace(',', '.'))
-col3.metric("Faltantes (Brasil sem PR)", f"{faltantes_br:,}".replace(',', '.'))
-col4.metric("Faltantes (Paraná)", f"{faltantes_pr:,}".replace(',', '.'))
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Tamanho Original da Base", f"{len(df_bruto):,}".replace(',', '.'))
+c2.metric("Tamanho Após Limpeza", f"{len(df_limpo):,}".replace(',', '.'))
+c3.metric("Faltantes (Brasil sem PR)", f"{faltantes_br:,}".replace(',', '.'))
+c4.metric("Faltantes (Paraná)", f"{faltantes_pr:,}".replace(',', '.'))
 
 st.markdown("---")
 
 # =====================================================================
-# SEÇÃO 2: OUTLIERS (COMPARAÇÃO ANTES E DEPOIS)
+# 2. TRATAMENTO DE OUTLIERS (BOXPLOTS)
 # =====================================================================
 st.header("2. Tratamento de Outliers (Boxplots)")
 st.write("""
 Para evitar distorções nos modelos preditivos e garantir a estabilização da variância estocástica, optámos pela técnica de **Truncamento (Trimming)** baseada no Intervalo Interquartil (IQR). 
-
-Abaixo é possível visualizar a distribuição dos dados de forma comparativa: do lado esquerdo, a base original contendo as anomalias e *outliers* extremos; do lado direito, o resultado estatisticamente robusto após a aplicação do filtro IQR.
 """)
 
 tabs = st.tabs(["Ciências da Natureza", "Ciências Humanas", "Linguagens", "Matemática", "Redação"])
@@ -81,54 +83,69 @@ colunas_nomes = [
     ('NU_NOTA_REDACAO', 'Redação')
 ]
 
-def plotar_boxplot_comparativo(df_plot, coluna, titulo, subtitulo, cor_fundo):
-    fig, ax = plt.subplots(figsize=(8, 4))
+def gerar_boxplot_estatistico(df, coluna, titulo, cor_pr, cor_br):
+    """Gera um boxplot agrupado usando estatísticas pré-calculadas"""
+    fig = go.Figure()
     
-    # Prepara o DataFrame temporário
-    df_temp = df_plot[['SG_UF_PROVA', coluna]].dropna().copy()
-    df_temp['Regiao_Label'] = np.where(df_temp['SG_UF_PROVA'] == 'PR', 'Paraná (PR)', 'Brasil (Sem PR)')
-    
-    sns.boxplot(
-        data=df_temp, 
-        x=coluna, 
-        y='Regiao_Label', 
-        hue='Regiao_Label',  # AJUSTE: Diz ao Seaborn que a cor vem desta coluna
-        ax=ax, 
-        palette=['#1f77b4', '#ff7f0e'], 
-        legend=False,        # AJUSTE: Remove a legenda repetida (já que o eixo Y já diz o que é)
-        order=['Paraná (PR)', 'Brasil (Sem PR)']
+    for regiao, label, cor in [('PR', 'Paraná (PR)', cor_pr), ('BR', 'Brasil (Sem PR)', cor_br)]:
+        # Filtra os dados da região
+        if regiao == 'PR':
+            data = df[df['SG_UF_PROVA'] == 'PR'][coluna].dropna()
+        else:
+            data = df[df['SG_UF_PROVA'] != 'PR'][coluna].dropna()
+            
+        if not data.empty:
+            # Cálculo dos quartis no servidor
+            q1 = np.percentile(data, 25)
+            median = np.percentile(data, 50)
+            q3 = np.percentile(data, 75)
+            low = data.min()
+            high = data.max()
+            
+            fig.add_trace(go.Box(
+                name=label,
+                y=['Notas'], # <-- EIXO Y FIXO: Coloca ambos na mesma "linha" base
+                q1=[q1], median=[median], q3=[q3],
+                lowerfence=[low], upperfence=[high],
+                fillcolor=cor, line=dict(color='white', width=1),
+                orientation='h', marker_color=cor
+            ))
+            
+    fig.update_layout(
+        title=titulo,
+        xaxis_title="Nota",
+        yaxis=dict(visible=False), # Esconde a palavra 'Notas' para o visual ficar limpo
+        boxmode='group',           # <-- O SEGREDO: Força o Plotly a colocar um ao lado/cima do outro (estilo hue)
+        height=300,
+        margin=dict(l=20, r=20, t=50, b=20),
+        showlegend=True,           # Ativamos a legenda para identificar as cores
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
-    
-    ax.set_title(f'{titulo}\n{subtitulo}', weight='bold')
-    ax.set_ylabel('')
-    ax.set_xlabel('Nota Avaliada')
-    ax.grid(True, linestyle='--', alpha=0.5)
-    ax.set_facecolor(cor_fundo)
-    
     return fig
 
-# Desenha os gráficos lado a lado dentro de cada tab
 for i, (col, nome) in enumerate(colunas_nomes):
     with tabs[i]:
-        col_esquerda, col_direita = st.columns(2)
+        c_esq, c_dir = st.columns(2)
         
-        with col_esquerda:
-            # Gráfico com os dados BRUTOS (Fundo levemente avermelhado)
-            fig_antes = plotar_boxplot_comparativo(df_bruto, col, nome, "(Antes do Trimming)", "#fff5f5")
-            st.pyplot(fig_antes)
+        with c_esq:
+            st.write(f"**{nome} (Antes)**")
+            fig_a = obter_grafico_cache(f"box_{col}_antes.json", 
+                                        lambda: gerar_boxplot_estatistico(df_bruto, col, "Original", '#1f77b4', '#ff7f0e'))
+            st.plotly_chart(fig_a, use_container_width=True)
             
-        with col_direita:
-            # Gráfico com os dados LIMPOS (Fundo levemente esverdeado/azulado)
-            fig_depois = plotar_boxplot_comparativo(df_limpo, col, nome, "(Após o Trimming)", "#f5fbff")
-            st.pyplot(fig_depois)
+        with c_dir:
+            st.write(f"**{nome} (Depois)**")
+            fig_d = obter_grafico_cache(f"box_{col}_depois.json", 
+                                        lambda: gerar_boxplot_estatistico(df_limpo, col, "Tratado", '#1f77b4', '#ff7f0e'))
+            st.plotly_chart(fig_d, use_container_width=True)
 
 st.markdown("---")
 
 # =====================================================================
-# SEÇÃO 3: OTIMIZAÇÃO DE TIPOS E MEMÓRIA
+# 3. OTIMIZAÇÃO DE TIPOS E MEMÓRIA
 # =====================================================================
 st.header("3. Otimização Estrutural (Memory Downcast)")
-st.write("A base de dados original consumia uma quantidade excessiva de memória RAM. Para viabilizar a execução fluida deste painel analítico na web, realizámos a alteração forçada dos tipos primitivos de dados e guardámos o ficheiro final no formato colunar `.parquet`.")
+st.write("A base de dados original consumia uma quantidade excessiva de memória RAM. Para viabilizar a execução fluida deste painel analítico na web, realizámos a alteração forçada dos tipos primitivos de dados.")
 
 dados_tipos = {
     'Nome da Coluna': ['SG_UF_PROVA', 'NU_NOTA_CN', 'NU_NOTA_CH', 'NU_NOTA_LC', 'NU_NOTA_MT', 'NU_NOTA_REDACAO'],
@@ -137,5 +154,4 @@ dados_tipos = {
     'Tamanho Novo (Por registo)': ['1 byte', '4 bytes', '4 bytes', '4 bytes', '4 bytes', '4 bytes']
 }
 
-df_tipos = pd.DataFrame(dados_tipos)
-st.dataframe(df_tipos, use_container_width=True, hide_index=True)
+st.dataframe(pd.DataFrame(dados_tipos), use_container_width=True, hide_index=True)

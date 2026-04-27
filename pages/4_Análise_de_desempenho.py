@@ -1,16 +1,20 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import os
+import plotly.graph_objects as go
+import plotly.express as px
+import plotly.io as pio
 
 # =====================================================================
 # CONFIGURAÇÃO DE DIRETÓRIOS E PÁGINA
 # =====================================================================
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(ROOT_DIR, 'data')
+CACHE_DIR = os.path.join(ROOT_DIR, 'cache_graficos')
 ARQUIVO_LIMPO = os.path.join(DATA_DIR, 'enem_2023_limpo.parquet')
+
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 st.set_page_config(page_title="Análise de Desempenho", page_icon="📈", layout="wide")
 
@@ -18,7 +22,19 @@ st.title("📈 Análise de Desempenho: Áreas, Línguas e Redação")
 st.markdown("---")
 
 # =====================================================================
-# CARREGAMENTO DOS DADOS
+# MOTOR DE CACHE DE GRÁFICOS (JSON)
+# =====================================================================
+def obter_grafico_cache(nome_arquivo, funcao_geradora):
+    caminho = os.path.join(CACHE_DIR, nome_arquivo)
+    if os.path.exists(caminho):
+        return pio.read_json(caminho)
+    
+    fig = funcao_geradora()
+    pio.write_json(fig, caminho)
+    return fig
+
+# =====================================================================
+# CARREGAMENTO DOS DADOS (OTIMIZADO)
 # =====================================================================
 if not os.path.exists(ARQUIVO_LIMPO):
     st.error("⚠️ Dados limpos não encontrados. Por favor, processe os dados na Home.")
@@ -35,163 +51,210 @@ def carregar_dados_desempenho():
     df['Regiao'] = np.where(df['SG_UF_PROVA'] == 'PR', 'Paraná (PR)', 'Brasil (Sem PR)')
     return df
 
-df = carregar_dados_desempenho()
+with st.spinner("Carregando base de desempenho..."):
+    df = carregar_dados_desempenho()
+
 colunas_notas = ['NU_NOTA_CN', 'NU_NOTA_CH', 'NU_NOTA_LC', 'NU_NOTA_MT', 'NU_NOTA_REDACAO']
 nomes_areas = ['C. Natureza', 'C. Humanas', 'Linguagens', 'Matemática', 'Redação']
 
 # =====================================================================
-# 1. ÁREAS DE MAIOR DESEMPENHO (MÉDIAS)
+# FUNÇÕES DE PLOTAGEM (PLOTLY COM PRÉ-CÁLCULO)
 # =====================================================================
-st.header("1. Quais as áreas de maior desempenho?")
-st.write("Comparação das médias aritméticas das notas nas 5 áreas do conhecimento.")
+def gerar_barras_medias():
+    df_medias = df.groupby('Regiao')[colunas_notas].mean().T
+    df_medias.index = nomes_areas
+    
+    fig = go.Figure()
+    for regiao, cor in [('Paraná (PR)', '#1f77b4'), ('Brasil (Sem PR)', '#ff7f0e')]:
+        fig.add_trace(go.Bar(
+            name=regiao, x=df_medias.index, y=df_medias[regiao],
+            marker_color=cor, text=[f"{v:.1f}" for v in df_medias[regiao]], textposition='outside'
+        ))
+        
+    fig.update_layout(title="Média de Notas por Área do Conhecimento", barmode='group', yaxis_title="Nota Média", margin=dict(t=50, b=20, l=20, r=20))
+    return fig
 
-df_medias = df.groupby('Regiao')[colunas_notas].mean().T
-df_medias.index = nomes_areas
-df_medias = df_medias[['Paraná (PR)', 'Brasil (Sem PR)']]
-
-fig1, ax1 = plt.subplots(figsize=(10, 5))
-df_medias.plot(kind='bar', ax=ax1, color=['#1f77b4', '#ff7f0e'], alpha=0.9, width=0.7)
-ax1.set_title('Média de Notas por Área do Conhecimento', weight='bold')
-ax1.set_ylabel('Nota Média')
-ax1.grid(True, linestyle='--', alpha=0.3, axis='y')
-ax1.tick_params(axis='x', rotation=0)
-
-for p in ax1.patches:
-    ax1.annotate(f'{p.get_height():.1f}', (p.get_x() + p.get_width() / 2, p.get_height()),
-                ha='center', va='bottom', weight='bold', fontsize=9)
-
-st.pyplot(fig1)
-
-st.markdown("---")
-
-# =====================================================================
-# 2. DISPERSÃO (DESVIO PADRÃO)
-# =====================================================================
-st.header("2. Qual área possui maior dispersão?")
-st.write("O Desvio Padrão indica o nível de desigualdade: quanto maior o valor, mais heterogêneo é o desempenho dos alunos.")
-
-col_esc, col_dir = st.columns([1, 2])
-
-with col_esc:
+def gerar_barras_std():
     df_std = df.groupby('Regiao')[colunas_notas].std().T
     df_std.index = nomes_areas
-    df_std = df_std[['Paraná (PR)', 'Brasil (Sem PR)']]
-    st.dataframe(df_std.style.format("{:.2f}"), use_container_width=True)
+    
+    fig = go.Figure()
+    for regiao, cor in [('Paraná (PR)', '#1f77b4'), ('Brasil (Sem PR)', '#ff7f0e')]:
+        fig.add_trace(go.Bar(
+            name=regiao, x=df_std.index, y=df_std[regiao],
+            marker_color=cor, text=[f"{v:.1f}" for v in df_std[regiao]], textposition='outside'
+        ))
+        
+    fig.update_layout(title="Dispersão (Desvio Padrão) por Área", barmode='group', yaxis_title="Desvio Padrão", margin=dict(t=50, b=20, l=20, r=20))
+    return df_std, fig
 
-with col_dir:
-    fig2, ax2 = plt.subplots(figsize=(10, 5))
-    df_std.plot(kind='bar', ax=ax2, color=['#1f77b4', '#ff7f0e'], alpha=0.9)
-    ax2.set_title('Dispersão (Desvio Padrão) por Área', weight='bold')
-    ax2.set_ylabel('Valor do Desvio Padrão')
-    ax2.grid(True, linestyle='--', alpha=0.3, axis='y')
-    ax2.tick_params(axis='x', rotation=0)
-    st.pyplot(fig2)
+def gerar_barras_lingua():
+    mapa_lingua = {0: 'Inglês', 1: 'Espanhol'}
+    df_lingua = df.copy()
+    df_lingua['Língua'] = df_lingua['TP_LINGUA'].map(mapa_lingua)
+    
+    ct_lingua = pd.crosstab(df_lingua['Regiao'], df_lingua['Língua'], normalize='index') * 100
+    
+    fig = go.Figure()
+    for regiao, cor in [('Paraná (PR)', '#1f77b4'), ('Brasil (Sem PR)', '#ff7f0e')]:
+        if regiao in ct_lingua.index:
+            y_vals = [ct_lingua.loc[regiao, 'Inglês'], ct_lingua.loc[regiao, 'Espanhol']]
+            fig.add_trace(go.Bar(
+                name=regiao, x=['Inglês', 'Espanhol'], y=y_vals,
+                marker_color=cor, text=[f"{v:.1f}%" for v in y_vals], textposition='outside'
+            ))
+            
+    fig.update_layout(title="Proporção de Escolha: Inglês vs Espanhol", barmode='group', yaxis_title="Percentual (%)")
+    return fig
+
+def gerar_boxplot_lingua_estatistico():
+    fig = go.Figure()
+    mapa_lingua = {0: 'Inglês', 1: 'Espanhol'}
+    
+    for regiao, cor in [('Paraná (PR)', '#1f77b4'), ('Brasil (Sem PR)', '#ff7f0e')]:
+        for lingua_codigo, lingua_nome in [(0, 'Inglês'), (1, 'Espanhol')]:
+            # Filtro e amostragem para o Boxplot não travar
+            mask = (df['SG_UF_PROVA'] == ('PR' if regiao == 'Paraná (PR)' else df['SG_UF_PROVA'] != 'PR')) & (df['TP_LINGUA'] == lingua_codigo)
+            data = df[mask]['NU_NOTA_LC'].dropna()
+            
+            if len(data) > 20000: data = data.sample(20000, random_state=42)
+            
+            if not data.empty:
+                fig.add_trace(go.Box(
+                    y=data, name=lingua_nome, legendgroup=regiao,
+                    marker_color=cor, showlegend=(lingua_codigo == 0),
+                    line=dict(color=cor), fillcolor=cor, opacity=0.7,
+                    hovertemplate=f"<b>{regiao} - {lingua_nome}</b><br>Nota: %{{y}}<extra></extra>"
+                ))
+                
+    fig.update_layout(title="Notas de Linguagens (LC) por Língua", boxmode='group', yaxis_title="Nota LC", legend_title="Região")
+    return fig
+
+def gerar_radar_competencias():
+    col_comp = ['NU_NOTA_COMP1', 'NU_NOTA_COMP2', 'NU_NOTA_COMP3', 'NU_NOTA_COMP4', 'NU_NOTA_COMP5']
+    labels_comp = ['Gramática', 'Tema/Repertório', 'Argumentação', 'Coesão', 'Proposta Interv.']
+    
+    df_comp = df.groupby('Regiao')[col_comp].mean().T
+    df_comp.index = labels_comp
+    
+    # "Pulo do Gato" para zoom dinâmico
+    min_nota = df_comp.min().min()
+    limite_inferior = max(0, min_nota - 15)
+    
+    fig = go.Figure()
+
+    # Configuração de Cores (Linha Sólida, Preenchimento Transparente)
+    config_cores = [
+        ('Paraná (PR)', '#1f77b4', 'rgba(31, 119, 180, 0.4)'), 
+        ('Brasil (Sem PR)', '#ff7f0e', 'rgba(255, 127, 14, 0.3)') # Brasil um pouco mais transparente para destacar o PR
+    ]
+
+    for regiao, cor_linha, cor_preenchimento in config_cores:
+        if regiao in df_comp.columns:
+            valores = df_comp[regiao].tolist()
+            # O Plotly exige que o gráfico feche o círculo repetindo o primeiro valor
+            valores += valores[:1]
+            theta_labels = labels_comp + [labels_comp[0]]
+
+            fig.add_trace(go.Scatterpolar(
+                r=valores, 
+                theta=theta_labels, 
+                fill='toself', 
+                name=regiao,
+                line=dict(color=cor_linha, width=3),
+                fillcolor=cor_preenchimento,
+                marker=dict(size=8, color=cor_linha)
+            ))
+        
+    fig.update_layout(
+        title=dict(
+            text="Radar de Competências da Redação<br><sup>(Escala ajustada para realçar diferenças estocásticas)</sup>", 
+            x=0.5, 
+            font=dict(size=18, color='#e0e0e0') # Título em cinza claro para contraste
+        ),
+        # TRANSPARÊNCIA DO FUNDO
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        polar=dict(
+            bgcolor='rgba(0,0,0,0)',
+            radialaxis=dict(
+                visible=True, 
+                range=[limite_inferior, 160], 
+                gridcolor="rgba(255, 255, 255, 0.15)", # Linhas circulares sutis
+                tickfont=dict(size=10, color='#b0b0b0'),
+                angle=30 # Rotaciona os números das notas para não ficarem em cima dos eixos
+            ),
+            angularaxis=dict(
+                tickfont=dict(size=12, color='#ffffff'), # Labels externas em branco
+                gridcolor="rgba(255, 255, 255, 0.15)"    # Linhas dos eixos (raios)
+            )
+        ),
+        showlegend=True,
+        legend=dict(
+            font=dict(color='#ffffff'),
+            bgcolor='rgba(0,0,0,0)',
+            orientation="h", 
+            yanchor="bottom", 
+            y=-0.2, 
+            xanchor="center", 
+            x=0.5
+        ),
+        margin=dict(t=80, b=60, l=60, r=60)
+    )
+    return df_comp, fig
+
+# =====================================================================
+# RENDERIZAÇÃO DA PÁGINA
+# =====================================================================
+
+# --- 1. ÁREAS DE MAIOR DESEMPENHO ---
+st.header("1. Áreas de maior desempenho?")
+st.write("Comparação das médias aritméticas das notas nas 5 áreas do conhecimento.")
+fig_medias = obter_grafico_cache("bar_medias_areas.json", gerar_barras_medias)
+st.plotly_chart(fig_medias, use_container_width=True)
 
 st.markdown("---")
 
-# =====================================================================
-# 3. LÍNGUA ESTRANGEIRA (INGLÊS VS ESPANHOL)
-# =====================================================================
-st.header("3. Escolha de Língua Estrangeira")
-mapa_lingua = {0: 'Inglês', 1: 'Espanhol'}
+# --- 2. DISPERSÃO ---
+st.header("2. Área de maior dispersão?")
+st.write("O Desvio Padrão indica o nível de desigualdade: quanto maior o valor, mais heterogêneo é o desempenho dos alunos.")
+col_esc, col_dir = st.columns([1, 2])
 
+with st.spinner("Processando..."):
+    df_std, fig_std = gerar_barras_std() # Calculamos dinâmico para popular a tabela
+
+with col_esc:
+    st.dataframe(df_std.style.format("{:.2f}"), use_container_width=True)
+with col_dir:
+    fig_std_cache = obter_grafico_cache("bar_std_areas.json", gerar_barras_std)[1] if not 'fig_std' in locals() else fig_std
+    st.plotly_chart(fig_std_cache, use_container_width=True)
+
+st.markdown("---")
+
+# --- 3. LÍNGUA ESTRANGEIRA ---
+st.header("3. Escolha de Língua Estrangeira")
 col_a, col_b = st.columns(2)
 
 with col_a:
     st.write("**Proporção de Escolha**")
-    ct_lingua = pd.crosstab(df['Regiao'], df['TP_LINGUA'].map(mapa_lingua), normalize='index') * 100
-    ct_lingua = ct_lingua[['Inglês', 'Espanhol']]
-    
-    fig3, ax3 = plt.subplots(figsize=(8, 5))
-    ct_lingua.T.plot(kind='bar', ax=ax3, color=['#1f77b4', '#ff7f0e'], width=0.7)
-    ax3.set_title('Proporção de Escolha: Inglês vs Espanhol', weight='bold')
-    ax3.set_ylabel('Percentual (%)')
-    ax3.tick_params(axis='x', rotation=0)
-    st.pyplot(fig3)
+    fig_lingua_prop = obter_grafico_cache("bar_lingua_proporcao.json", gerar_barras_lingua)
+    st.plotly_chart(fig_lingua_prop, use_container_width=True)
 
 with col_b:
-    st.write("**Desempenho em Linguagens por Opção de Língua**")
-    fig4, ax4 = plt.subplots(figsize=(8, 5))
-    df_lingua_plot = df.copy()
-    df_lingua_plot['Língua'] = df_lingua_plot['TP_LINGUA'].map(mapa_lingua)
-    
-    sns.boxplot(data=df_lingua_plot, x='Língua', y='NU_NOTA_LC', hue='Regiao', 
-                palette=['#1f77b4', '#ff7f0e'], ax=ax4)
-    ax4.set_title('Boxplot: Notas de Linguagens (LC)', weight='bold')
-    ax4.set_ylabel('Nota')
-    st.pyplot(fig4)
+    st.write("**Desempenho (Boxplot Amostral)**")
+    fig_lingua_box = obter_grafico_cache("box_lingua_notas.json", gerar_boxplot_lingua_estatistico)
+    st.plotly_chart(fig_lingua_box, use_container_width=True)
 
 st.markdown("---")
 
-# =====================================================================
-# 4. COMPETÊNCIAS DA REDAÇÃO (TABELA E RADAR)
-# =====================================================================
+# --- 4. REDAÇÃO (RADAR) ---
 st.header("4. Competências da Redação")
 st.write("Análise das 5 competências avaliadas na Redação (0 a 200 pontos cada).")
 
-col_comp = ['NU_NOTA_COMP1', 'NU_NOTA_COMP2', 'NU_NOTA_COMP3', 'NU_NOTA_COMP4', 'NU_NOTA_COMP5']
-labels_comp = ['Gramática', 'Tema/Repertório', 'Argumentação', 'Coesão', 'Proposta Interv.']
+with st.spinner("Processando Radar..."):
+    df_radar, fig_radar = gerar_radar_competencias()
 
-df_comp = df.groupby('Regiao')[col_comp].mean().T
-df_comp.index = labels_comp
-df_comp = df_comp[['Paraná (PR)', 'Brasil (Sem PR)']]
+st.dataframe(df_radar.style.format("{:.2f}"), use_container_width=True)
 
-st.table(df_comp.style.format("{:.2f}"))
-
-# GRÁFICO DE RADAR
-def plotar_radar(df_radar):
-    # 1. Preparação dos dados
-    categorias = list(df_radar.index)
-    N = len(categorias)
-    
-    # Ângulos para cada eixo (dividindo os 360 graus em 5 partes)
-    angulos = [n / float(N) * 2 * np.pi for n in range(N)]
-    angulos += angulos[:1] # fecha o polígono
-    
-    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(projection='polar'))
-    
-    # -----------------------------------------------------------------
-    # O PULO DO GATO: Ajuste de escala para dar "Zoom" nas diferenças
-    # -----------------------------------------------------------------
-    # Descobrimos a menor e maior nota para definir os limites do radar
-    min_nota = df_radar.min().min()
-    max_nota = df_radar.max().max()
-    
-    # Definimos o limite inferior um pouco abaixo da menor nota (ex: 15 pontos abaixo)
-    # Isso faz com que as diferenças de 2 ou 3 pontos pareçam gigantes
-    limite_inferior = max(0, min_nota - 15) 
-    limite_superior = 160 # A nota máxima da competência é sempre 200
-    
-    ax.set_ylim(limite_inferior, limite_superior)
-    # -----------------------------------------------------------------
-
-    # Plotar Paraná (PR) - Azul
-    valores_pr = df_radar['Paraná (PR)'].tolist()
-    valores_pr += valores_pr[:1]
-    ax.plot(angulos, valores_pr, linewidth=3, linestyle='solid', label='Paraná (PR)', color='#1f77b4', marker='o')
-    ax.fill(angulos, valores_pr, '#1f77b4', alpha=0.2)
-    
-    # Plotar Brasil (BR) - Laranja
-    valores_br = df_radar['Brasil (Sem PR)'].tolist()
-    valores_br += valores_br[:1]
-    ax.plot(angulos, valores_br, linewidth=3, linestyle='dashdot', label='Brasil (Sem PR)', color='#ff7f0e', marker='s')
-    ax.fill(angulos, valores_br, '#ff7f0e', alpha=0.1)
-    
-    # Ajustes das legendas e eixos
-    plt.xticks(angulos[:-1], categorias, color='black', size=11, weight='bold')
-    
-    # Customização dos círculos de fundo (Grids)
-    ticks_calculados = np.linspace(limite_inferior, limite_superior, 5)
-    ax.set_rticks(ticks_calculados)
-    ax.set_yticklabels([f"{int(t)}" for t in ticks_calculados], color="grey", size=9)
-    
-    ax.set_rlabel_position(30) # Rotaciona os números do eixo para não bater na linha
-    ax.grid(True, linestyle='--', alpha=0.6)
-    
-    ax.legend(loc='upper right', bbox_to_anchor=(0.1, 0.1), frameon=True, shadow=True)
-    ax.set_title("Destaques e Dificuldades: Radar de Competências\n(Escala Ajustada para Comparação)", 
-                 weight='bold', size=14, pad=20)
-    
-    return fig
-
-st.pyplot(plotar_radar(df_comp))
+fig_radar_cache = obter_grafico_cache("radar_redacao.json", lambda: gerar_radar_competencias()[1])
+st.plotly_chart(fig_radar_cache, use_container_width=True)
