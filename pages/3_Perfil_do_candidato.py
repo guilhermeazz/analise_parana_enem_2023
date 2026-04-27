@@ -33,7 +33,7 @@ def obter_grafico_cache(nome_arquivo, funcao_geradora):
     return fig
 
 # =====================================================================
-# VERIFICAÇÃO E CARREGAMENTO DOS DADOS (OTIMIZADO)
+# VERIFICAÇÃO E CARREGAMENTO DOS DADOS (ULTRA-OTIMIZADO)
 # =====================================================================
 if not os.path.exists(ARQUIVO_DADOS):
     st.error(f"⚠️ O ficheiro de dados não foi encontrado na pasta 'data'.")
@@ -41,16 +41,23 @@ if not os.path.exists(ARQUIVO_DADOS):
 
 @st.cache_data
 def carregar_dados_perfil():
-    """Lê apenas as colunas sociodemográficas essenciais para evitar sobrecarga na RAM"""
+    """Lê as colunas e aplica downcast agressivo para evitar travamentos de RAM"""
     colunas_perfil = [
         'SG_UF_PROVA', 'TP_SEXO', 'TP_COR_RACA', 
         'TP_FAIXA_ETARIA', 'IN_TREINEIRO', 'TP_ESCOLA'
     ]
     df_perfil = pd.read_parquet(ARQUIVO_DADOS, columns=colunas_perfil)
     
-    df_perfil['TP_SEXO'] = df_perfil['TP_SEXO'].astype('category')
-    df_perfil['TP_ESCOLA'] = pd.to_numeric(df_perfil['TP_ESCOLA'], errors='coerce')
+    # Otimização extrema de memória (Converte tudo para categorias super leves)
+    colunas_para_categoria = ['SG_UF_PROVA', 'TP_SEXO', 'TP_COR_RACA', 'TP_FAIXA_ETARIA', 'IN_TREINEIRO']
+    for col in colunas_para_categoria:
+        df_perfil[col] = df_perfil[col].astype('category')
+        
+    df_perfil['TP_ESCOLA'] = pd.to_numeric(df_perfil['TP_ESCOLA'], errors='coerce').astype('category')
+    
+    # Cria a coluna de Região e também a transforma em categoria
     df_perfil['Regiao'] = np.where(df_perfil['SG_UF_PROVA'] == 'PR', 'Paraná (PR)', 'Brasil (Sem PR)')
+    df_perfil['Regiao'] = df_perfil['Regiao'].astype('category')
     
     return df_perfil
 

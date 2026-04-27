@@ -130,13 +130,13 @@ for i, (col, nome) in enumerate(colunas_nomes):
         with c_esq:
             st.write(f"**{nome} (Antes)**")
             fig_a = obter_grafico_cache(f"box_{col}_antes.json", 
-                                        lambda: gerar_boxplot_estatistico(df_bruto, col, "Original", '#1f77b4', '#ff7f0e'))
+                                        lambda c=col: gerar_boxplot_estatistico(df_bruto, c, "Original", '#1f77b4', '#ff7f0e'))
             st.plotly_chart(fig_a, use_container_width=True)
             
         with c_dir:
             st.write(f"**{nome} (Depois)**")
             fig_d = obter_grafico_cache(f"box_{col}_depois.json", 
-                                        lambda: gerar_boxplot_estatistico(df_limpo, col, "Tratado", '#1f77b4', '#ff7f0e'))
+                                        lambda c=col: gerar_boxplot_estatistico(df_limpo, c, "Tratado", '#1f77b4', '#ff7f0e'))
             st.plotly_chart(fig_d, use_container_width=True)
 
 st.markdown("---")

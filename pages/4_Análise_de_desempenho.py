@@ -34,7 +34,7 @@ def obter_grafico_cache(nome_arquivo, funcao_geradora):
     return fig
 
 # =====================================================================
-# CARREGAMENTO DOS DADOS (OTIMIZADO)
+# CARREGAMENTO DOS DADOS (ULTRA-OTIMIZADO)
 # =====================================================================
 if not os.path.exists(ARQUIVO_LIMPO):
     st.error("⚠️ Dados limpos não encontrados. Por favor, processe os dados na Home.")
@@ -49,6 +49,17 @@ def carregar_dados_desempenho():
     ]
     df = pd.read_parquet(ARQUIVO_LIMPO, columns=colunas)
     df['Regiao'] = np.where(df['SG_UF_PROVA'] == 'PR', 'Paraná (PR)', 'Brasil (Sem PR)')
+    
+    # --- MEMORY DOWNCAST (Previne o travamento da RAM no Servidor) ---
+    df['SG_UF_PROVA'] = df['SG_UF_PROVA'].astype('category')
+    df['Regiao'] = df['Regiao'].astype('category')
+    df['TP_LINGUA'] = df['TP_LINGUA'].astype('category')
+    
+    colunas_float = ['NU_NOTA_CN', 'NU_NOTA_CH', 'NU_NOTA_LC', 'NU_NOTA_MT', 'NU_NOTA_REDACAO',
+                     'NU_NOTA_COMP1', 'NU_NOTA_COMP2', 'NU_NOTA_COMP3', 'NU_NOTA_COMP4', 'NU_NOTA_COMP5']
+    for col in colunas_float:
+        df[col] = df[col].astype('float32')
+        
     return df
 
 with st.spinner("Carregando base de desempenho..."):
@@ -113,11 +124,11 @@ def gerar_boxplot_lingua_estatistico():
     
     for regiao, cor in [('Paraná (PR)', '#1f77b4'), ('Brasil (Sem PR)', '#ff7f0e')]:
         for lingua_codigo, lingua_nome in [(0, 'Inglês'), (1, 'Espanhol')]:
-            # Filtro e amostragem para o Boxplot não travar
-            mask = (df['SG_UF_PROVA'] == ('PR' if regiao == 'Paraná (PR)' else df['SG_UF_PROVA'] != 'PR')) & (df['TP_LINGUA'] == lingua_codigo)
+            # Filtro e amostragem para o Boxplot não travar (Reduzido para 10.000 para fluidez máxima)
+            mask = (df['Regiao'] == regiao) & (df['TP_LINGUA'] == lingua_codigo)
             data = df[mask]['NU_NOTA_LC'].dropna()
             
-            if len(data) > 20000: data = data.sample(20000, random_state=42)
+            if len(data) > 10000: data = data.sample(10000, random_state=42)
             
             if not data.empty:
                 fig.add_trace(go.Box(

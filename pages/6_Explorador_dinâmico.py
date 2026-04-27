@@ -30,7 +30,7 @@ DICIONARIO_NOTAS = {
 }
 
 # =====================================================================
-# CARREGAMENTO DE DADOS (CACHE)
+# CARREGAMENTO DE DADOS (CACHE OTIMIZADO)
 # =====================================================================
 if not os.path.exists(ARQUIVO_LIMPO):
     st.error("⚠️ Ficheiro de dados não encontrado.")
@@ -62,23 +62,36 @@ def carregar_dados_interativos():
         return 'Não Informado'
     df['Faixa de Renda'] = df['Q006'].apply(agrupar_renda)
     
+    # --- MEMORY DOWNCAST (Essencial para não travar o servidor) ---
+    colunas_para_categoria = ['Regiao', 'Escola', 'Internet', 'Sexo', 'Cor/Raça', 'Faixa de Renda']
+    for col in colunas_para_categoria:
+        df[col] = df[col].astype('category')
+        
+    colunas_notas = ['NU_NOTA_CN', 'NU_NOTA_CH', 'NU_NOTA_LC', 'NU_NOTA_MT', 'NU_NOTA_REDACAO']
+    for col in colunas_notas:
+        df[col] = df[col].astype('float32')
+    
     return df
 
 with st.spinner("A preparar o motor analítico..."):
     df_completo = carregar_dados_interativos()
 
 # =====================================================================
-# BARRA LATERAL (MÚLTIPLOS FILTROS)
+# BARRA LATERAL (MÚLTIPLOS FILTROS COM BOTÃO DE APLICAR)
 # =====================================================================
 st.sidebar.header("🎯 Filtros Dinâmicos")
 
-# Filtros Multiselect (Permitem escolher várias opções ao mesmo tempo)
-filtro_sexo = st.sidebar.multiselect("Sexo:", df_completo['Sexo'].dropna().unique(), default=df_completo['Sexo'].dropna().unique())
-filtro_escola = st.sidebar.multiselect("Tipo de Escola:", ['Pública', 'Privada'], default=['Pública', 'Privada'])
-filtro_raca = st.sidebar.multiselect("Cor/Raça:", df_completo['Cor/Raça'].dropna().unique(), default=df_completo['Cor/Raça'].dropna().unique())
-filtro_internet = st.sidebar.multiselect("Acesso à Internet:", df_completo['Internet'].dropna().unique(), default=df_completo['Internet'].dropna().unique())
+# Envolver tudo num Form impede que a página trave a cada clique
+with st.sidebar.form(key="form_filtros"):
+    filtro_sexo = st.multiselect("Sexo:", df_completo['Sexo'].dropna().unique(), default=df_completo['Sexo'].dropna().unique())
+    filtro_escola = st.multiselect("Tipo de Escola:", ['Pública', 'Privada'], default=['Pública', 'Privada'])
+    filtro_raca = st.multiselect("Cor/Raça:", df_completo['Cor/Raça'].dropna().unique(), default=df_completo['Cor/Raça'].dropna().unique())
+    filtro_internet = st.multiselect("Acesso à Internet:", df_completo['Internet'].dropna().unique(), default=df_completo['Internet'].dropna().unique())
+    
+    # O botão mágico que resolve os travamentos
+    botao_aplicar = st.form_submit_button("Aplicar Filtros 🚀")
 
-# Aplicação dos Filtros (Lógica Booleana Pandas)
+# A máscara aplica-se de uma só vez (Lógica Booleana Pandas)
 mask = (
     df_completo['Sexo'].isin(filtro_sexo) &
     df_completo['Escola'].isin(filtro_escola) &
@@ -116,8 +129,8 @@ st.markdown("<br>", unsafe_allow_html=True)
 # =====================================================================
 st.subheader(f"📊 Média de {DICIONARIO_NOTAS[nota_selecionada]} por {eixo_x_selecionado}")
 
-# Calcula a média exata usando 100% dos dados filtrados
-df_barras = df_filtrado.groupby([eixo_x_selecionado, 'Regiao'])[nota_selecionada].mean().reset_index()
+# Calcula a média exata usando 100% dos dados filtrados (observed=True para lidar com Categorias)
+df_barras = df_filtrado.groupby([eixo_x_selecionado, 'Regiao'], observed=True)[nota_selecionada].mean().reset_index()
 
 # Ordenação inteligente se for Renda
 if eixo_x_selecionado == 'Faixa de Renda':
@@ -155,10 +168,10 @@ st.markdown("---")
 st.subheader(f"📦 Distribuição e Outliers (Boxplot agrupado por {eixo_x_selecionado})")
 st.write("O Boxplot mostra a variação real das notas (Mediana, Quartis e Extremos). Para garantir a fluidez do painel, os gráficos abaixo utilizam uma amostra perfeitamente representativa dos dados filtrados.")
 
-# AMOSTRAGEM INTELIGENTE: Pega no máximo 40.000 linhas da base filtrada para não travar o Plotly
+# AMOSTRAGEM INTELIGENTE (Reduzido para 10.000 para não travar o Plotly no navegador)
 df_boxplot = df_filtrado.dropna(subset=[nota_selecionada, eixo_x_selecionado])
-if len(df_boxplot) > 40000:
-    df_boxplot = df_boxplot.sample(n=40000, random_state=42)
+if len(df_boxplot) > 10000:
+    df_boxplot = df_boxplot.sample(n=10000, random_state=42)
 
 # Ordenação para o Boxplot
 if eixo_x_selecionado == 'Faixa de Renda':

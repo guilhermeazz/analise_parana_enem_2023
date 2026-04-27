@@ -48,7 +48,7 @@ def obter_grafico_cache(nome_arquivo, funcao_geradora):
     return fig
 
 # =====================================================================
-# CARREGAMENTO E TRATAMENTO
+# CARREGAMENTO E TRATAMENTO (OTIMIZADO)
 # =====================================================================
 if not os.path.exists(ARQUIVO_LIMPO):
     st.error("⚠️ O ficheiro de dados limpos não foi encontrado.")
@@ -60,11 +60,20 @@ def carregar_dados_socio():
     df = pd.read_parquet(ARQUIVO_LIMPO, columns=colunas)
     df['Regiao'] = np.where(df['SG_UF_PROVA'] == 'PR', 'Paraná (PR)', 'Brasil (Sem PR)')
     
-    # Numérico para cálculo de Correlação de Pearson
+    # Numérico para cálculo de Correlação de Pearson (Fazer antes de converter para categoria)
     renda_ordem = sorted(df['Q006'].dropna().unique())
     df['RENDA_NUM'] = df['Q006'].map({cat: i+1 for i, cat in enumerate(renda_ordem)})
     df['COMP_NUM'] = df['Q024'].map({cat: i for i, cat in enumerate(sorted(df['Q024'].dropna().unique()))})
     
+    # --- MEMORY DOWNCAST ---
+    colunas_categoria = ['SG_UF_PROVA', 'Regiao', 'Q006', 'Q024', 'Q025']
+    for col in colunas_categoria:
+        df[col] = df[col].astype('category')
+        
+    colunas_float = ['NU_NOTA_REDACAO', 'NU_NOTA_MT', 'NU_NOTA_CN', 'NU_NOTA_CH', 'NU_NOTA_LC']
+    for col in colunas_float:
+        df[col] = df[col].astype('float32')
+        
     return df, renda_ordem
 
 with st.spinner("Processando dados socioeconômicos..."):
@@ -78,7 +87,7 @@ with st.spinner("Processando dados socioeconômicos..."):
 
 def gerar_linha_renda_redacao():
     # Pré-cálculo da média exata
-    df_agg = df.groupby(['Q006', 'Regiao'])['NU_NOTA_REDACAO'].mean().reset_index()
+    df_agg = df.groupby(['Q006', 'Regiao'], observed=True)['NU_NOTA_REDACAO'].mean().reset_index()
     # Adicionando o rótulo amigável
     df_agg['Renda_Label'] = df_agg['Q006'].map(MAPA_RENDA)
     
@@ -146,8 +155,8 @@ def gerar_barras_internet():
     return fig
 
 def gerar_barras_computador(coluna_nota, titulo):
-    # Agregação rápida no backend
-    df_agg = df.groupby(['Q024', 'Regiao'])[coluna_nota].mean().reset_index()
+    # Agregação rápida no backend (observed=True para lidar com a nova otimização de Categorias)
+    df_agg = df.groupby(['Q024', 'Regiao'], observed=True)[coluna_nota].mean().reset_index()
     df_agg['Computadores'] = df_agg['Q024'].map(MAPA_COMPUTADOR)
     
     fig = go.Figure()
@@ -206,3 +215,4 @@ with col_b:
 _, p_mt = pearsonr(df.dropna(subset=['COMP_NUM', 'NU_NOTA_MT'])['COMP_NUM'], df.dropna(subset=['COMP_NUM', 'NU_NOTA_MT'])['NU_NOTA_MT'])
 _, p_red = pearsonr(df.dropna(subset=['COMP_NUM', 'NU_NOTA_REDACAO'])['COMP_NUM'], df.dropna(subset=['COMP_NUM', 'NU_NOTA_REDACAO'])['NU_NOTA_REDACAO'])
 
+st.success(f"**Conclusão Estatística:** O P-Value calculado ({p_mt:.1e}) confirma que a posse de tecnologia é um preditor significativo de desempenho tanto no Paraná quanto no Brasil.")

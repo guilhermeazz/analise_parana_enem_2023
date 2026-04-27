@@ -69,6 +69,15 @@ def carregar_dados_dinamicos():
     # Mapeamentos Amigáveis
     df['Escola_Label'] = df['TP_ESCOLA'].map({1: 'Não Respondeu', 2: 'Pública', 3: 'Privada'})
     
+    # --- MEMORY DOWNCAST ---
+    colunas_categoria = ['SG_UF_PROVA', 'TP_SEXO', 'TP_ESCOLA', 'Q006', 'Q024', 'TP_COR_RACA', 'Regiao', 'Escola_Label']
+    for col in colunas_categoria:
+        df[col] = df[col].astype('category')
+        
+    colunas_float = ['NU_NOTA_CN', 'NU_NOTA_CH', 'NU_NOTA_LC', 'NU_NOTA_MT', 'NU_NOTA_REDACAO']
+    for col in colunas_float:
+        df[col] = df[col].astype('float32')
+        
     return df
 
 with st.spinner("A preparar o motor de dados..."):
@@ -165,7 +174,7 @@ with col_nota:
 
 if cat_x != cat_y:
     pivot_df = pd.pivot_table(
-        df_filtrado, values=nota_target, index=cat_y, columns=cat_x, aggfunc='mean'
+        df_filtrado, values=nota_target, index=cat_y, columns=cat_x, aggfunc='mean', observed=True
     ).round(1)
     
     if cat_y == 'Q006': pivot_df = pivot_df.loc[sorted(pivot_df.index)]
@@ -247,4 +256,3 @@ fig_scatter.update_layout(
 st.plotly_chart(fig_scatter, use_container_width=True)
 
 st.markdown("---")
-
